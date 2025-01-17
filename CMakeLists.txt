@@ -14,6 +14,8 @@ endif()
 # ----------------
 
 add_library(DPG_lib SHARED "")
+include (cmake/EnableEigen.cmake)
+enable_eigen(DPG_lib)
 target_link_libraries(DPG_lib PUBLIC NeoPZ::pz)
 target_include_directories(DPG_lib PUBLIC ${PZ_INCLUDE_DIRS})
 set_target_properties(DPG_lib PROPERTIES LINKER_LANGUAGE CXX)
