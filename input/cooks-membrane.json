@@ -1,0 +1,33 @@
+{	
+	"MeshName": "cooks-membrane.msh",
+
+	"DisppOrder": 2,
+
+	"Dim": 2,
+
+	"Resolution": 0,
+
+	"Domain": [
+		{
+			"name": "Domain",
+			"matID": 1,
+			"E": 240.565,
+			"nu": 0.4999
+		}
+	],
+
+	"Boundary":[
+        {
+            "name": "FixedEnd",
+            "matID": 2,
+            "type": 0,
+            "value": 0.0
+        },
+        {
+            "name": "ShearStress",
+            "matID": 3,
+            "type": 6,
+            "value": 6.25
+        }
+	]
+}
