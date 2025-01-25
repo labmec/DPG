@@ -12,7 +12,7 @@
 #include <pzskylstrmatrix.h>
 #include <TPZMultiphysicsCompMesh.h>
 #include <pzstepsolver.h>
-#include <TPZLinearAnalysis.h>
+#include <TPZLinearAnalysis.h> 
 #include <TPZSSpStructMatrix.h> //symmetric sparse matrix storage
 #include "pzfstrmatrix.h"
 #include <TPZSimpleTimer.h>

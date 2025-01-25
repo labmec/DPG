@@ -1,0 +1,53 @@
+{	
+	"MeshName": "quadmesh.msh",
+
+	"UTrialPorder": 2,
+	"PTrialPorder": 0,
+	"UTestPorder": 4,
+	"PTestPorder": 2,
+	"FluxPorder": 2,
+
+	"Dim": 2,
+
+	"Resolution": 0,
+
+	"Domain": [
+		{
+			"name": "dom",
+			"matID": 1,
+			"E": 100,
+			"nu": 0.25
+		}
+	],
+
+	"Boundary":[
+        {
+            "name": "bcB",
+            "matID": 2,
+            "type": 0,
+            "value": 0.0,
+			"dimension": 1
+        },
+        {
+            "name": "bcR",
+            "matID": 3,
+            "type": 0,
+            "value": 0.0,
+			"dimension": 1
+        },
+        {
+            "name": "bcT",
+            "matID": 4,
+            "type": 0,
+            "value": 0.0,
+			"dimension": 1
+        },
+        {
+            "name": "bcL",
+            "matID": 5,
+            "type": 0,
+            "value": 0.0,
+			"dimension": 1
+        }
+	]
+}
