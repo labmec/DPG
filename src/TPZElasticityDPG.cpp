@@ -20,7 +20,7 @@ TPZElasticityDPG::TPZElasticityDPG(int matID,
                                  int dimension,
                                  REAL young_modulus,
                                  REAL poisson,
-                                 AnalysisType analysisType,
+                                 enum AnalysisType analysisType,
                                  REAL thickness) : TBase(matID, dimension,young_modulus,poisson,analysisType,thickness)
 {
  
@@ -36,21 +36,35 @@ void TPZElasticityDPG::Contribute(const TPZVec<TPZMaterialDataT<STATE>> &datavec
         |GT  S|,
         where K is the stiffness matrix, G the gradient operator, GT the divergence operator and S the bulk matrix
     */
+    if(datavec.size() < 4){
+        std::cout << "This material needs to be implemented using five data vectors" << std::endl;
+        DebugStop();
+    }
 
-    TPZFMatrix<REAL> &PhiU = datavec[EUindex].phi;
-    int64_t nShapeU = PhiU.Rows();
+    auto &dphiU = datavec[EUindex].dphix;
+    int64_t nShapeU = dphiU.Cols();
 
-    TPZFMatrix<REAL> &PhiP = datavec[EPindex].phi;
+    auto &PhiP = datavec[EPindex].phi;
     int64_t nShapeP = PhiP.Rows();
 
-    TPZFNMatrix<60, REAL> dphi = datavec[EUindex].dphix;
-    auto axes = datavec[EUindex].axes;
+    auto &PhiU = datavec[EUindex].phi;
 
-    TPZFNMatrix<3, REAL> dphiU(fdimension, nShapeU, 0.0);
-    TPZAxesTools<REAL>::Axes2XYZ(dphi, dphiU, axes);
+    auto &dphiV = datavec[EVindex].dphix;
+    int64_t nShapeV = dphiV.Cols();
+
+    auto &PhiV = datavec[EVindex].phi;
+
+    auto &PhiQ = datavec[EQindex].phi;
+    int64_t nShapeQ = PhiQ.Rows();
+
+    int firstU = 0;
+    int firstP = nShapeU*fdimension;
+    int firstV = firstP + nShapeP;
+    int firstQ = firstV + nShapeV*fdimension;
+    int firsttraction = firstQ + nShapeQ;
 
     TPZFNMatrix<3, REAL> SourceTerm(fdimension, 1, 0.0);
-    TPZVec<REAL> sourceAux(3);
+    TPZManVector<REAL,3> sourceAux(3);
 
     if (this->HasForcingFunction())
     {
@@ -68,60 +82,114 @@ void TPZElasticityDPG::Contribute(const TPZVec<TPZMaterialDataT<STATE>> &datavec
     for (int i = fdimension; i < n; i++)
         D(i,i) *= 0.5;
 
+    // D.Print("D = ");
     // divergence matrix
     TPZFNMatrix<150, STATE> divPhiU(fdimension * nShapeU, 1, 0.0);
     for (int j = 0; j < nShapeU; j++)
         for (int i = 0; i < fdimension; i++)
             divPhiU(j * fdimension + i, 0) = dphiU(i, j);
 
-    // strain matrix B
-    TPZFNMatrix<150, STATE> matrixB(n, nShapeU * fdimension, 0.0);
+    // divergence matrix
+    TPZFNMatrix<150, STATE> divPhiV(fdimension * nShapeV, 1, 0.0);
+    for (int j = 0; j < nShapeV; j++)
+        for (int i = 0; i < fdimension; i++)
+            divPhiV(j * fdimension + i, 0) = dphiV(i, j);
 
+    // strain matrix BU
+    TPZFNMatrix<150, STATE> matrixBU(n, nShapeU * fdimension, 0.0);
     for (int j = 0; j < nShapeU; j++)
     {
         int cont = fdimension;
         for (int i = 0; i < fdimension; i++)
         {
-            matrixB(i, j * fdimension + i) = dphiU(i, j);
+            matrixBU(i, j * fdimension + i) = dphiU(i, j);
 
             for (int k = i + 1; k < fdimension; k++)
             {
-                matrixB(cont, fdimension * j + i) = dphiU(k, j);
-                matrixB(cont, fdimension * j + k) = dphiU(i, j);
+                matrixBU(cont, fdimension * j + i) = dphiU(k, j);
+                matrixBU(cont, fdimension * j + k) = dphiU(i, j);
                 cont++;
             }
         }
     }
 
-    TPZFMatrix<REAL> phiU_force(fdimension * nShapeU, fdimension, 0.0);
-    for (int j = 0; j < nShapeU; j++)
+    // strain matrix BV
+    TPZFNMatrix<150, STATE> matrixBV(n, nShapeV * fdimension, 0.0);
+    for (int j = 0; j < nShapeV; j++)
+    {
+        int cont = fdimension;
+        for (int i = 0; i < fdimension; i++)
+        {
+            matrixBV(i, j * fdimension + i) = dphiV(i, j);
+
+            for (int k = i + 1; k < fdimension; k++)
+            {
+                matrixBV(cont, fdimension * j + i) = dphiV(k, j);
+                matrixBV(cont, fdimension * j + k) = dphiV(i, j);
+                cont++;
+            }
+        }
+    }
+
+    TPZFMatrix<REAL> phiV_force(fdimension * nShapeV, fdimension, 0.0);
+    for (int j = 0; j < nShapeV; j++)
     {
         for (int i = 0; i < fdimension; i++)
         {
-            phiU_force(fdimension * j + i, i) = PhiU(j);
+            phiV_force(fdimension * j + i, i) = PhiV(j);
         }
     }
 
     // body forces contribution
-    ef.AddContribution(0, 0, phiU_force, false, SourceTerm, false, weight);
+    ef.AddContribution(firstV, 0, phiV_force, false, SourceTerm, false, weight);
 
     //Stiffness - Matrix K contribution
-    TPZFNMatrix<150, REAL> aux;
-    D.Multiply(matrixB, aux);
+    TPZFNMatrix<150, REAL> auxV, auxU;
+    D.Multiply(matrixBV, auxV);
+    D.Multiply(matrixBU, auxU);
     
     REAL factor = weight;
-    ek.AddContribution(0, 0, matrixB, true, aux, false, factor);
+    ek.AddContribution(firstU, firstV, matrixBU, true, auxV, false, factor); // (1)
+    ek.AddContribution(firstV, firstU, matrixBV, true, auxU, false, factor); // (2)
 
-    // Gradient - matrix G contribution
+    // Divergence contribution
     factor = -weight;
-    ek.AddContribution(0, fdimension*nShapeU, divPhiU, false, PhiP, true, factor);
+    ek.AddContribution(firstV, firstP, divPhiV, false, PhiP, true, factor); //(3)
+    ek.AddContribution(firstP, firstV, PhiP, false, divPhiV, true, factor); //(4)
 
-    // Divergence - Matrix GT contribution
-    ek.AddContribution(fdimension*nShapeU, 0, PhiP, false, divPhiU, true, factor);
+    ek.AddContribution(firstU, firstQ, divPhiU, false, PhiQ, true, factor); //(5)
+    ek.AddContribution(firstQ, firstU, PhiQ, false, divPhiU, true, factor); //(6)
 
     //Bulk Matrix S contribution
     factor = -(1.0 / fbulk) * weight;
-    ek.AddContribution(fdimension*nShapeU, fdimension*nShapeU, PhiP, false, PhiP, true, factor);
+    ek.AddContribution(firstQ, firstP, PhiQ, false, PhiP, true, factor); //(7)
+    ek.AddContribution(firstP, firstQ, PhiP, false, PhiQ, true, factor); //(8)
+
+    // Adding terms of the weight matrix
+    TPZFNMatrix<150, REAL> BL2(fdimension, nShapeV * fdimension, 0.0);
+    for(int i=0; i < nShapeV; i++)
+    {
+        for(int j=0; j < fdimension; j++)
+        {
+            BL2(j, i*fdimension+j) = PhiV(i);
+        }
+    }
+    TPZFNMatrix<300, REAL> BGradV(2*fdimension, nShapeV * fdimension, 0.0);
+    if(fdimension != 2) DebugStop();
+    for(int i=0; i < nShapeV; i++)
+    {
+        for(int j=0; j < fdimension; j++)
+        {
+            BGradV(j, i*fdimension) = dphiV(j,i);
+            BGradV(j+fdimension, i*fdimension+1) = dphiV(j,i);
+        }
+    }
+    /// target operator laplacian + L2
+    ek.AddContribution(firstV, firstV, BL2, true, BL2, false, weight); //(8)
+    ek.AddContribution(firstV, firstV, BGradV, true, BGradV, false, weight); //(9)
+
+    /// L2 contribution for phiQ
+    ek.AddContribution(firstQ, firstQ, PhiQ, false, PhiQ, true, weight); //(10)
 
 #ifdef PZ_LOG
     if(logger.isDebugEnabled()){
@@ -136,13 +204,26 @@ void TPZElasticityDPG::Contribute(const TPZVec<TPZMaterialDataT<STATE>> &datavec
 
 void TPZElasticityDPG::ContributeBC(const TPZVec<TPZMaterialDataT<STATE>> &datavec, REAL weight, TPZFMatrix<STATE> &ek, TPZFMatrix<STATE> &ef, TPZBndCondT<STATE> &bc)
 {
-    int index = (bc.Type() == 0 || bc.Type() == 2) ? EUindex : EPindex;
-
-    TPZFNMatrix<150, REAL> PhiU = datavec[EUindex].phi;
-    TPZFMatrix<REAL> &PhiP = datavec[EPindex].phi;
+    
+    const int n = fdimension * (fdimension + 1) / 2;
+    auto &PhiU = datavec[EUindex].phi;
+    auto &PhiP = datavec[EPindex].phi;
+    auto &PhiV = datavec[EVindex].phi;
+    auto &PhiQ = datavec[EQindex].phi;
+    auto &PhiT = datavec[ETractionIndex].phi;
 
     int64_t nShapeU = PhiU.Rows();
     int64_t nShapeP = PhiP.Rows();
+    int64_t nShapeV = PhiV.Rows();
+    int64_t nShapeQ = PhiQ.Rows();
+    int64_t nShapeT = PhiT.Rows();
+
+    int firstIndexU = 0;
+    int firstIndexP = nShapeU*fdimension;
+    int firstIndexV = firstIndexP + nShapeP;
+    int firstIndexQ = firstIndexV + nShapeV*fdimension;
+    int firstIndexT = firstIndexQ + nShapeQ;
+
 
     TPZFNMatrix<20, STATE> val1(3, 3, 0.0);
     TPZManVector<STATE, 3> val2(3, 0.0);
@@ -150,9 +231,38 @@ void TPZElasticityDPG::ContributeBC(const TPZVec<TPZMaterialDataT<STATE>> &datav
 
     if (bc.HasForcingFunctionBC())
     {
-        TPZVec<STATE> uVal;
-        TPZFMatrix<STATE> gradVal;
-        bc.ForcingFunctionBC()(datavec[index].x, val2, val1);
+        TPZManVector<STATE> uVal(fdimension, 0.0);
+        TPZFNMatrix<9,STATE> gradVal(fdimension,fdimension,0.0);
+        bc.ForcingFunctionBC()(datavec[0].x, uVal, gradVal);
+        TPZFNMatrix<9, STATE> sigmavec(n, 1, 0.0);
+        // if(flambda == 0.) DebugStop();
+        StressTensor(gradVal, sigmavec);
+        if(this->fAnalytic) {
+            TPZFNMatrix<4, STATE> sigmaloc(2,2,0.0);
+            fAnalytic->Sigma(datavec[0].x, sigmaloc);
+            sigmavec(0) = sigmaloc(0,0);
+            sigmavec(1) = sigmaloc(1,1);
+            sigmavec(2) = sigmaloc(0,1);
+        }
+        STATE divsol = gradVal(0,0)+gradVal(1,1);
+        if(fdimension == 2 && bc.Type() == 0)
+        {
+            val2[0] = uVal[0];
+            val2[1] = uVal[1];
+            val1(0,0) = sigmavec(0,0);
+            val1(1,1) = sigmavec(1,0);
+            val1(0,1) = sigmavec(2,0);
+            val1(1,0) = sigmavec(2,0);
+        } else if (fdimension == 2 && bc.Type() == 1)
+        {
+            val2[0] = (sigmavec(0,0))*datavec[0].normal[0] + sigmavec(2,0)*datavec[0].normal[1];
+            val2[1] = (sigmavec(1,0))*datavec[0].normal[1] + sigmavec(2,0)*datavec[0].normal[0];
+        } else if (bc.Type() == 2)
+        {
+
+        } else {
+            DebugStop();
+        }
     }
     else
     {
@@ -167,10 +277,10 @@ void TPZElasticityDPG::ContributeBC(const TPZVec<TPZMaterialDataT<STATE>> &datav
             {
                 for (int j = 0; j < fdimension; j++)
                 {
-                    ef(fdimension*i+j, 0) += BIGNUMBER * val2[j] * PhiU(i,0) * weight;
+                    ef(firstIndexU+fdimension*i+j, 0) += BIGNUMBER * val2[j] * PhiU(i,0) * weight;
                     for (int k = 0; k < nShapeU; k++)
                     {
-                        ek(fdimension*i+j, fdimension*k+j) += BIGNUMBER * PhiU(i,0) *PhiU(k,0) * weight;
+                        ek(firstIndexU+fdimension*i+j, firstIndexU+fdimension*k+j) += BIGNUMBER * PhiU(i,0) *PhiU(k,0) * weight;
                     }
                 }
             }
@@ -178,11 +288,14 @@ void TPZElasticityDPG::ContributeBC(const TPZVec<TPZMaterialDataT<STATE>> &datav
         }
         case 1 : // Neumann condition
         {
-            for (int i = 0; i < nShapeU; i++) 
+            for (int i = 0; i < nShapeT; i++) 
             {
                 for (int j = 0; j < fdimension; j++)
                 {
-                    ef(fdimension*i, 0) += val2[j] * PhiU(i, 0) * weight;
+                    ef(firstIndexT+fdimension*i, 0) += BIGNUMBER * val2[j] * PhiT(i, 0) * weight;
+                    for(int k=0; k<nShapeT; k++) {
+                        ek(firstIndexT+fdimension*i+j, firstIndexT+fdimension*k+j) += BIGNUMBER * PhiT(i,0) * PhiT(k,0) * weight;
+                    }
                 }
             }
             break;
@@ -190,7 +303,7 @@ void TPZElasticityDPG::ContributeBC(const TPZVec<TPZMaterialDataT<STATE>> &datav
             
         case 2 : // Mixed Condition
         {
-            DebugStop(); // Implement me            
+                       
             break;
         }
         
@@ -198,10 +311,10 @@ void TPZElasticityDPG::ContributeBC(const TPZVec<TPZMaterialDataT<STATE>> &datav
         {
             for(int i = 0 ; i < nShapeU; i++)
             {
-                ef(fdimension*i, 0) += BIGNUMBER * val2[0] * PhiU(i,0) * weight; // forced x displacement
+                ef(firstIndexU+fdimension*i, 0) += BIGNUMBER * val2[0] * PhiU(i,0) * weight; // forced x displacement
                 for (int j = 0 ; j < nShapeU; j++)
                 {
-                    ek(fdimension*i,fdimension*j) += BIGNUMBER * PhiU(i,0) *PhiU(j,0) * weight;
+                    ek(firstIndexU+fdimension*i,firstIndexU+fdimension*j) += BIGNUMBER * PhiU(i,0) *PhiU(j,0) * weight;
                 }
             }
             break;
@@ -211,10 +324,10 @@ void TPZElasticityDPG::ContributeBC(const TPZVec<TPZMaterialDataT<STATE>> &datav
         {
             for(int i = 0 ; i < nShapeU; i++)
             {
-                ef(fdimension*i+1, 0) += BIGNUMBER * val2[1] * PhiU(i,0) * weight; // forced y displacement
+                ef(firstIndexU+fdimension*i+1, 0) += BIGNUMBER * val2[1] * PhiU(i,0) * weight; // forced y displacement
                 for (int j = 0 ; j < nShapeU; j++)
                 {
-                    ek(fdimension*i+1,fdimension*j+1) += BIGNUMBER * PhiU(i,0) *PhiU(j,0) * weight;
+                    ek(firstIndexU+fdimension*i+1,firstIndexU+fdimension*j+1) += BIGNUMBER * PhiU(i,0) *PhiU(j,0) * weight;
                 }
             }
             break;
@@ -237,6 +350,7 @@ void TPZElasticityDPG::ContributeBC(const TPZVec<TPZMaterialDataT<STATE>> &datav
         }          
 		case 6: // stressField Neumann condition
         {
+            DebugStop();
             for(int in = 0; in < fdimension; in++)
                 for(int jn = 0; jn < fdimension; jn++)
                     val2[in] += val1(in,jn) * datavec[EUindex].normal[jn];
@@ -316,5 +430,58 @@ void TPZElasticityDPG::FillBoundaryConditionDataRequirements(int type, TPZVec<TP
     {
         datavec[idata].SetAllRequirements(false);
     }
+    datavec[0].fNeedsNormal = true;
 }
 
+int TPZElasticityDPG::IntegrationRuleOrder(const TPZVec<int> &elPMaxOrder) const
+{
+    int trialorder = elPMaxOrder[0];
+    int testorder = elPMaxOrder[3];
+    return testorder*2+2;
+}
+
+void TPZElasticityDPG::Errors(const TPZVec<TPZMaterialDataT<STATE>> &data, TPZVec<REAL> &errors) {
+    TPZElasticityTH::Errors(data, errors);
+    //SpaceIndex {EUindex, EPindex, EVindex, EQindex, ETractionIndex};
+    auto &u_h = data[EUindex].sol[0];
+    auto &gradu = data[EUindex].dsol[0];
+    auto &v_h = data[EVindex].sol[0];
+    auto &gradv = data[EVindex].dsol[0];
+    auto p_h = data[EPindex].sol[0][0];
+    auto q_h = data[EQindex].sol[0][0];
+    TPZManVector<STATE,3> u_exact(2,0.);
+    TPZFNMatrix<6,STATE> gradu_exact(2,2,0.), dudx(3,2,0.),sigma_exact(2,2,0.);
+    TPZAxesTools<STATE>::Axes2XYZ(gradu, dudx, data[EUindex].axes);
+    if(fAnalytic) {
+        fAnalytic->Solution(data[EUindex].x, u_exact, gradu_exact);
+        fAnalytic->Sigma(data[EUindex].x, sigma_exact);
+    } else {
+        DebugStop();
+    }
+    STATE p_exact = -sigma_exact(0,0)-sigma_exact(1,1);
+    int nerr = TPZElasticityTH::NEvalErrors();
+    errors[nerr] = 0.0;
+    errors[nerr+1] = 0.0;
+    for(int i=0; i<2; i++) {
+        errors[nerr] += (v_h[i])*(v_h[i])+q_h*q_h;
+        errors[nerr+1] += (u_h[i]-u_exact[i])*(u_h[i]-u_exact[i])+(p_h-p_exact)*(p_h-p_exact);
+        for(int j=0; j<2; j++) {
+            errors[nerr] += gradv(i,j)*gradv(i,j);
+            errors[nerr+1] += (dudx(i,j)-gradu_exact(i,j))*(dudx(i,j)-gradu_exact(i,j));
+        }
+    }
+}
+    
+int TPZElasticityDPG::NEvalErrors() const {
+    return TPZElasticityTH::NEvalErrors()+2;
+}
+
+void TPZElasticityDPG::ErrorNames(TPZVec<std::string> &names)
+{
+    int nerr = NEvalErrors();
+    if(names.size() < nerr) names.resize(nerr);
+    TPZElasticityTH::ErrorNames(names);
+    int nerrors = TPZElasticityTH::NEvalErrors();
+    names[nerrors] = ("GNorm psi");
+    names[nerrors+1] = ("GNorm error");
+}

@@ -11,6 +11,7 @@
 #include <TPZMatInterfaceCombinedSpaces.h>
 #include <TPZMatErrorCombinedSpaces.h>
 #include "TPZElasticityTH.h"
+#include "TPZAnalyticSolution.h"
 #include <math.h>
 
 #ifndef TPZELASTICITYDPG
@@ -24,6 +25,14 @@ public:
 
 protected:
     enum SpaceIndex {ETrialU, EP, ETestU, EQ, ETraction};
+
+    /// L2 weight value
+    REAL fL2Weight = 1.0;
+    /// H1 weight value
+    REAL fH1Weight = 1.0;
+    /// bulk weight value
+    REAL fBulkWeight = 1.0;
+
     
 public:
 
@@ -31,7 +40,7 @@ public:
     TPZElasticityDPG();
 
     /// Creates a material object and inserts it in the vector of material pointers of the mesh
-    TPZElasticityDPG(int matID, int dimension, REAL young_modulus, REAL poisson, AnalysisType analysisType = AnalysisType::EGeneral, REAL thickness = 1.0);
+    TPZElasticityDPG(int matID, int dimension, REAL young_modulus, REAL poisson, enum AnalysisType analysisType = TPZElasticityTH::AnalysisType::EGeneral, REAL thickness = 1.0);
     
     /// Destructor
     ~TPZElasticityDPG();
@@ -45,6 +54,15 @@ public:
     /** returns the variable index associated with the name */
     int VariableIndex(const std::string &name) const override;
     
+    int IntegrationRuleOrder(const TPZVec<int> &elPMaxOrder) const override;
+
+    void ErrorNames(TPZVec<std::string> &names) override;
+
+    void Errors(const TPZVec<TPZMaterialDataT<STATE>>& data, TPZVec<REAL>& errors) override;
+    
+    int NEvalErrors() const override;
+
+
     /**
      * It computes a contribution to the stiffness matrix and load vector at one domain integration point.
      * @param datavec[in] stores all input data

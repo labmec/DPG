@@ -20,7 +20,7 @@ TPZElasticityTH::TPZElasticityTH(int matID,
                                  int dimension,
                                  REAL young_modulus,
                                  REAL poisson,
-                                 AnalysisType analysisType,
+                                 enum AnalysisType analysisType,
                                  REAL thickness) : TBase(matID),
                                                    fdimension(dimension),
                                                    fyoung(young_modulus),
@@ -28,6 +28,13 @@ TPZElasticityTH::TPZElasticityTH(int matID,
                                                    fAnalysisType(analysisType),
                                                    fthickness(thickness)
 {
+    SetYoungPoisson(fyoung, fpoisson);
+}
+
+void TPZElasticityTH::SetYoungPoisson(REAL young_modulus, REAL poisson)
+{
+    fyoung = young_modulus;
+    fpoisson = poisson;
     flambda = fyoung * fpoisson / ((1.0 + fpoisson) * (1.0 - 2.0 * fpoisson));
     fmu = 0.5 * fyoung / (1.0 + fpoisson);
 
@@ -55,6 +62,7 @@ TPZElasticityTH::TPZElasticityTH(int matID,
         break;
     }
     }
+
 }
 
 TPZElasticityTH::~TPZElasticityTH() {}
@@ -304,6 +312,10 @@ int TPZElasticityTH::VariableIndex(const std::string &name) const
         return EStrain;
     if (!strcmp("VonMises", name.c_str()))
         return EVonMises;
+    if (!strcmp("ExactDisplacement", name.c_str()))
+        return EExactDisplacement;
+    if (!strcmp("ExactPressure", name.c_str()))
+        return EExactPressure;
 
     std::cout << "\n\nVar index not implemented\n\n";
     DebugStop();
@@ -318,15 +330,19 @@ int TPZElasticityTH::NSolutionVariables(int var) const
     switch (var)
     {
     case EPressure: // pressure  [scalar]
+    case EExactPressure:
     case EVonMises: // VonMises
+    case EExactVonMises:
         aux = 1;
         break;
     case EDisplacement: // displacement [vector]
     case EForce:        // external force [vector]
+    case EExactDisplacement:
         aux = 3;
         break;
     case EStress: // stress tensor
     case EStrain: // strain tensor
+    case EExactStress:
         aux = 9;
         break;
     default:
@@ -344,9 +360,15 @@ void TPZElasticityTH::Solution(const TPZVec<TPZMaterialDataT<STATE>> &datavec, i
     TPZManVector<STATE, 3> p_h = datavec[EPindex].sol[0];
 
     TPZFNMatrix<10, STATE> gradU_xsi = datavec[EUindex].dsol[0];
-    auto axes = datavec[EUindex].axes;
+    auto &axes = datavec[EUindex].axes;
+    auto &x = datavec[EUindex].x;
+
+    TPZFNMatrix<9, REAL> gradUFEM(3, fdimension, 0.0);
+    
+    TPZAxesTools<REAL>::Axes2XYZ(gradU_xsi, gradUFEM, axes);
+    if(fdimension == 2 && (fabs(gradUFEM(2,0)) > 1.e-10 || fabs(gradUFEM(2,1)) > 1.e-10)) DebugStop();
     TPZFNMatrix<9, REAL> gradU(fdimension, fdimension, 0.0);
-    TPZAxesTools<REAL>::Axes2XYZ(gradU_xsi, gradU, axes);
+    for(int i=0;i<fdimension;i++) for(int j=0;j<fdimension;j++) gradU(i,j) = gradUFEM(i,j);
 
     TPZFNMatrix<9, STATE> strain(3, 3, 0.0);
 
@@ -356,7 +378,7 @@ void TPZElasticityTH::Solution(const TPZVec<TPZMaterialDataT<STATE>> &datavec, i
     {
         for (int j = 0; j < fdimension; j++)
         {
-            strain(i, j) = 0.5 * (gradU(i, j) + gradU(j, i));
+            strain(i, j) = 0.5 * (gradUFEM(i, j) + gradUFEM(j, i));
         }
     }
 
@@ -476,6 +498,55 @@ void TPZElasticityTH::Solution(const TPZVec<TPZMaterialDataT<STATE>> &datavec, i
         break;
     }
 
+    case EExactDisplacement:
+    {
+        TPZManVector<STATE, 3> sol(fdimension);
+        fExactSol(datavec[EUindex].x, sol, gradU);
+        Solout[0] = sol[0];
+        Solout[1] = sol[1];
+        if (Dimension() == 3)
+            Solout[2] = sol[2];
+        break;
+    }
+        case EExactPressure:
+    {
+        TPZManVector<STATE, 3> sol(3);
+        fExactSol(datavec[EUindex].x, sol, gradU);
+        TPZFNMatrix<6, STATE> sigmavoight(n, 1, 0.0);
+        DeviatoricStressTensor(gradU, sigmavoight);
+
+        TPZFNMatrix<9, STATE> sigma(3, 3, 0.0);
+        int cont = fdimension - 1;
+        for (int i = 0; i < fdimension; i++)
+        {
+            sigma(i, i) = sigmavoight(i, 0) - p_h[0];
+            for (int j = i + 1; j < fdimension; j++)
+            {
+                sigma(i, j) = sigmavoight(++cont, 0);
+                sigma(j, i) = sigmavoight(cont, 0);
+            }
+        }
+
+        if (fAnalysisType == AnalysisType::EPlaneStrain) {
+            sigma(2, 2) = fthickness * fpoisson * (sigma(0, 0) + sigma(1, 1));
+        }
+        if(fAnalytic) {
+            TPZFNMatrix<4, STATE> sigmaloc(2,2,0.0);
+            fAnalytic->Sigma(x, sigmaloc);
+            REAL diff = 0.;
+            for(int i=0; i<2; i++) for(int j=0; j<2; j++) diff += (sigma(i,j)-sigmaloc(i,j))*(sigma(i,j)-sigmaloc(i,j));
+            if(diff > 1.e-6) {
+                std::cout << "Pressure error = " << diff << std::endl;
+            }
+        }
+
+
+
+        Solout[0] = -(sigma(0,0)+sigma(1,1)+sigma(2,2));
+        break;
+    }
+
+
     default:
     {
         std::cout << "\n\nVar index not implemented\n\n";
@@ -504,6 +575,19 @@ void TPZElasticityTH::FillBoundaryConditionDataRequirements(int type, TPZVec<TPZ
     datavec[EPindex].fNeedsNormal = true;
 }
 
+void TPZElasticityTH::ErrorNames(TPZVec<std::string> &names) {
+    if(names.size() < 8) names.Resize(8);
+    names[0] = "L2 p";
+    names[1] = "L2 p_ex";
+    names[2] = "L2 u";
+    names[3] = "L2 u_ex";
+    names[4] = "L2 divu";
+    names[5] = "L2 divu_ex";
+    names[6] = "L2 sigma";
+    names[7] = "L2 sigma_Ex";
+}
+
+
 void TPZElasticityTH::Errors(const TPZVec<TPZMaterialDataT<STATE>> &data, TPZVec<REAL> &errors)
 {
     // 0: L2 p, 1: L2 p_ex, 2: L2 u, 3: L2 u_ex, 4: L2 divu, 5: L2 divu_ex, 6: L2 sigma, 7: L2 sigma_Ex
@@ -512,8 +596,8 @@ void TPZElasticityTH::Errors(const TPZVec<TPZMaterialDataT<STATE>> &data, TPZVec
 
     errors.Resize(NEvalErrors());
 
-    TPZManVector<STATE, 4> sol_exact(4);
-    TPZFNMatrix<9, STATE> gradsol_exact(3, 3);
+    TPZManVector<STATE, 4> sol_exact(fdimension, 0.0);
+    TPZFNMatrix<9, STATE> gradsol_exact(fdimension, fdimension, 0.0);
 
     // Getting the exact solution for velocity, pressure and velocity gradient
     fExactSol(data[EUindex].x, sol_exact, gradsol_exact);
@@ -531,13 +615,22 @@ void TPZElasticityTH::Errors(const TPZVec<TPZMaterialDataT<STATE>> &data, TPZVec
 
     const int n = fdimension * (fdimension + 1) / 2;
     TPZFNMatrix<6, REAL> sigma_exact(n, 1), sigma_h(n, 1);
-    StressTensor(gradsol_exact, sigma_exact);
+
+    if(fAnalytic) {
+        TPZFNMatrix<4, STATE> sigmaloc(2,2,0.0);
+        fAnalytic->Sigma(data[EUindex].x, sigmaloc);
+        sigma_exact(0,0) = sigmaloc(0,0);
+        sigma_exact(1,0) = sigmaloc(1,1);
+        sigma_exact(2,0) = sigmaloc(0,1);
+    } else {
+        StressTensor(gradsol_exact, sigma_exact);
+    }
     StressTensor(gradu_h, sigma_h, p_h[0]);
 
     STATE p_exact = 0.0; //If poisson == 0.5, this will break, maybe create a mor general Elasticity Analytic Solution class to deal with this issue
     for (int i = 0; i < fdimension; i++)
     {
-        p_exact -= sigma_exact(i,i);
+        p_exact -= sigma_exact(i,0);
     }
     p_exact *= 1./fdimension;
 
@@ -553,6 +646,11 @@ void TPZElasticityTH::Errors(const TPZVec<TPZMaterialDataT<STATE>> &data, TPZVec
     diffp = p_h[0] - p_exact;
     errors[0] = diffp * diffp;
     errors[1] = p_exact * p_exact;
+
+    if(std::isnan(errors[0]) || std::isnan(errors[1]) || std::isinf(errors[0]) || std::isinf(errors[1]))
+    {
+        std::cout << "Pressure error is nanor inf" << std::endl;
+    }
 
     errors[2] = 0.0;
     errors[3] = 0.0;
@@ -716,7 +814,7 @@ void TPZElasticityTH::DeviatoricStressTensor(const TPZFNMatrix<10, STATE> &gradU
     D.Multiply(strain, sigma);
 }
 
-void TPZElasticityTH::StressTensor(const TPZFNMatrix<10, STATE> &gradU, TPZFNMatrix<6, REAL> &sigma)
+void TPZElasticityTH::StressTensor(const TPZFMatrix<STATE> &gradU, TPZFMatrix<STATE> &sigmavec)
 {
     const int n = fdimension * (fdimension + 1) / 2;
 
@@ -726,7 +824,7 @@ void TPZElasticityTH::StressTensor(const TPZFNMatrix<10, STATE> &gradU, TPZFNMat
     TPZFNMatrix<6, REAL> strain(n, 1, 0.0);
     StrainTensor(gradU, strain);
 
-    D.Multiply(strain, sigma);
+    D.Multiply(strain, sigmavec);
 }
 
 void TPZElasticityTH::StressTensor(const TPZFNMatrix<10, STATE> &gradU, TPZFNMatrix<6, REAL> &sigma, REAL pressure)

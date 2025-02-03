@@ -9,6 +9,7 @@
 
 #include <TPZNullMaterialCS.h>
 #include "TPZElasticityDPG.h"
+#include "TPZAnalyticSolution.h"
 
 
 using namespace std;
@@ -32,6 +33,7 @@ void TPZProblemDataDPG::ReadJson(std::string file){
     json input = json::parse(filejson,nullptr,true,true); // to ignore comments in json file
     
     // checking infos in the json file
+    if(input.find("ProblemName") == input.end()) DebugStop();
     if(input.find("MeshName") == input.end()) DebugStop();
     if(input.find("UTrialPorder") == input.end()) DebugStop();
     if(input.find("PTrialPorder") == input.end()) DebugStop();
@@ -41,8 +43,14 @@ void TPZProblemDataDPG::ReadJson(std::string file){
     if(input.find("Dim") == input.end()) DebugStop();
     if(input.find("Resolution")==input.end()) DebugStop();
     if(input.find("Domain") == input.end()) DebugStop();
+    if(input.find("PostProcessVariables") == input.end()) DebugStop();
         
     // accessing and assigning values
+
+    for(auto &var : input["PostProcessVariables"]){
+        fPostProcessVariables.push_back(var);
+    }
+    fProblemName = input["ProblemName"];
     fMeshName = input["MeshName"];    
     
     fUTrialOrder = input["UTrialPorder"];
@@ -81,7 +89,8 @@ void TPZProblemDataDPG::ReadJson(std::string file){
         bcdata.name = bcjson["name"];
         bcdata.type = bcjson["type"];
         bcdata.matID = bcjson["matID"];
-        bcdata.value[0] = bcjson["value"];
+        bcdata.value[0] = bcjson["value"][0];
+        bcdata.value[1] = bcjson["value"][1];
         if(bcjson.find("domainID") != bcjson.end()) bcdata.domainID = bcjson["domainID"];
         bcdata.dimension = bcjson["dimension"];
         fBcVec.push_back(bcdata);
@@ -154,6 +163,13 @@ void TPZProblemDataDPG::InsertMaterialObjects(TPZMultiphysicsCompMesh *cmesh)
             val1.Zero();
         }
     }
+    fPostProcessVariables =  {
+        "Displacement",
+        "Pressure",
+        "Stress",
+        "Strain",
+        "VonMises"};
+
 }
 
 #include <TPZGmshReader.h>

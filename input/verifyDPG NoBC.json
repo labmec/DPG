@@ -1,61 +1,51 @@
 {	
-	
-    "ProblemName": "quadmesh",
-    "MeshName": "quadmesh.msh",
+	"MeshName": "quadmesh.msh",
 
-	"UTrialPorder": 2,
-	"PTrialPorder": 2,
-	"UTestPorder": 3,
-	"PTestPorder": 3,
-	"FluxPorder": 1,
+	"UTrialPorder": 1,
+	"PTrialPorder": 1,
+	"UTestPorder": 2,
+	"PTestPorder": 2,
+	"FluxPorder": 0,
 
 	"Dim": 2,
 
-	"Resolution": 2,
+	"Resolution": 0,
 
 	"Domain": [
 		{
 			"name": "dom",
 			"matID": 1,
 			"E": 100,
-			"nu": 0.5
+			"nu": 0.0
 		}
 	],
-    "PostProcessVariables": [
-        "Displacement",
-        "ExactDisplacement",
-        "Pressure",
-        "Stress",
-        "Strain",
-        "VonMises"
-    ],
-    
+
 	"Boundary":[
         {
             "name": "bcB",
             "matID": 2,
-            "type": 0,
+            "type": 2,
             "value": [0.0,0.0],
 			"dimension": 1
         },
         {
             "name": "bcR",
             "matID": 3,
-            "type": 1,
+            "type": 2,
             "value": [1.0,0.0],
 			"dimension": 1
         },
         {
             "name": "bcT",
             "matID": 4,
-            "type": 0,
+            "type": 2,
             "value": [0.0,0.0],
 			"dimension": 1
         },
         {
             "name": "bcL",
             "matID": 5,
-            "type": 0,
+            "type": 2,
             "value": [1.0,0.0],
 			"dimension": 1
         }

@@ -8,7 +8,9 @@
 #include <string>
 #include "input_config.h"
 #include <TPZMultiphysicsCompMesh.h>
+#include "TPZAnalyticSolution.h"
 
+class TElasticity2DAnalytic;
 // declaration of simulation data class.
 // all the data herein used are storaged in a .json file. It can be called and storaged using ReadJson
 
@@ -36,6 +38,8 @@ private:
     using json = nlohmann::json; // declaration of json class
     
     std::string fMeshName = "none";
+
+    std::string fProblemName = "none";
     
     int fUTrialOrder = 2; // polynomial approximation order for velocity
     int fPTrialOrder = 0; // polynomial approximation order for pressure
@@ -59,6 +63,10 @@ private:
     TPZVec<TPZCompMesh*> fMeshVector;
 
     TPZMultiphysicsCompMesh *fCMesh = nullptr;
+
+    TElasticity2DAnalytic *fAnalytic = nullptr;
+
+    TPZVec<std::string> fPostProcessVariables;
     
 public:
     TPZProblemDataDPG();
@@ -72,6 +80,9 @@ public:
     
     const std::string& MeshName() const {return fMeshName;}
     void SetMeshName(const std::string& meshname) {fMeshName = meshname;} 
+
+    const std::string& ProblemName() const {return fProblemName;}
+    void SetProblemName(const std::string& problemname) {fProblemName = problemname;}
     
     const int& UTrialOrder() const {return fUTrialOrder;}
     void SetTrialUOrder(int k) {fUTrialOrder = k;}
@@ -114,6 +125,22 @@ public:
 
     TPZMultiphysicsCompMesh* CMesh() {return fCMesh;}
     void SetCMesh(TPZMultiphysicsCompMesh* cmesh) {fCMesh = cmesh;}
+
+    TElasticity2DAnalytic* Analytic() {return fAnalytic;}
+    void SetAnalytic(TElasticity2DAnalytic* analytic) {
+        fAnalytic = analytic;
+        if(fDomain.size() == 1) {
+            auto &domain = fDomain[0];
+            analytic->gE = domain.E;
+            analytic->gPoisson = domain.nu;
+        } else {
+            std::cout << "Analytic solution not set\n";
+            DebugStop();
+        }
+    }
+
+    TPZVec<std::string>& PostProcessVariables() {return fPostProcessVariables;}
+    void SetPostProcessVariables(const TPZVec<std::string>& postprocess) {fPostProcessVariables = postprocess;}
 
     void InsertMaterialObjects(TPZMultiphysicsCompMesh *cmesh);
 

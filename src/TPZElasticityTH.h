@@ -10,6 +10,7 @@
 #include <TPZMatCombinedSpaces.h>
 #include <TPZMatInterfaceCombinedSpaces.h>
 #include <TPZMatErrorCombinedSpaces.h>
+#include "TPZAnalyticSolution.h"
 #include <math.h>
 
 #ifndef TPZELASTICITYTH
@@ -49,8 +50,10 @@ protected:
     REAL fthickness;
 
     AnalysisType fAnalysisType;
+
+    TElasticity2DAnalytic *fAnalytic = nullptr;
     
-    enum SpaceIndex {EUindex, EPindex, EVMindex, EPMindex};
+    enum SpaceIndex {EUindex, EPindex, EVindex, EQindex, ETractionIndex};
     
     /// Big number for penalization method
     REAL fBigNumber = pow(10,std::numeric_limits<STATE>::max_digits10*2/3);
@@ -66,6 +69,22 @@ public:
     /// Destructor
     ~TPZElasticityTH();
     
+    void SetAnalytic(TElasticity2DAnalytic *analytic) {
+        auto exact = analytic->ExactSolution();
+        auto forcing = analytic->ForceFunc();
+        this->SetExactSol(exact,5);
+        this->SetForcingFunction(forcing,5);
+        fAnalytic = analytic;
+        SetYoungPoisson(fAnalytic->gE, fAnalytic->gPoisson);
+        if(analytic->fPlaneStress != 0) fAnalysisType = AnalysisType::EPlaneStress;
+        else fAnalysisType = AnalysisType::EPlaneStrain;
+    }
+
+    void SetYoungPoisson(REAL young_modulus, REAL poisson);
+
+    /// return the analysis type of the material
+    AnalysisType AnalysisType() const {return fAnalysisType;}
+
     /// returns the solution associated with the var index based on the finite element approximation
     void Solution(const TPZVec<TPZMaterialDataT<STATE>>&datavec, int var, TPZVec<STATE>& Solout) override;
     
@@ -114,6 +133,8 @@ public:
 
     void FillBoundaryConditionDataRequirements(int type, TPZVec<TPZMaterialDataT<STATE>> &datavec) const override;
     
+    virtual void ErrorNames(TPZVec<std::string> &names);
+
     virtual void Errors(const TPZVec<TPZMaterialDataT<STATE>>& data, TPZVec<REAL>& errors) override;
     
     int NEvalErrors() const override {return 8;}
@@ -126,11 +147,11 @@ public:
 
     virtual void DeviatoricStressTensor(const TPZFNMatrix<10, STATE>& gradU, TPZFNMatrix<6,REAL>& sigma);
 
-    virtual void StressTensor(const TPZFNMatrix<10, STATE>& gradU, TPZFNMatrix<6,REAL>& sigma); //This function computes sigma directly from epsilon
+    virtual void StressTensor(const TPZFMatrix<STATE>& gradU, TPZFMatrix<STATE>& sigmavec); //This function computes sigma directly from epsilon, returns sigma in voight notation!!!
 
     virtual void StressTensor(const TPZFNMatrix<10, STATE>& gradU, TPZFNMatrix<6,REAL>& sigma, REAL pressure); //This function computes sigma through its deviatoric and hidrostatic counterparts
 
-    enum SolutionVars {ENone = -1, EPressure = 0, EDisplacement = 1, EForce = 2, EStress = 3, EStrain = 4, EVonMises = 5};
+    enum SolutionVars {ENone = -1, EPressure = 0, EDisplacement = 1, EForce = 2, EStress = 3, EStrain = 4, EVonMises = 5, EExactDisplacement = 6, EExactPressure = 7, EExactStress = 8, EExactStrain = 9, EExactVonMises = 10};
 };
 
 #endif
